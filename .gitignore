@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv*/
+runtime/
+dist/
+integrations/AstrbotEX/
+integrations/A.E.B./
+plugins/vision/yolo/data/
+*.sqlite3
+.env
+.env.*

@@ -1,0 +1,114 @@
+diff --git a/astrbot_plugin_astrbotex_interaction/README.md b/astrbot_plugin_astrbotex_interaction/README.md
+index d4c99f1..279e843 100644
+--- a/astrbot_plugin_astrbotex_interaction/README.md
++++ b/astrbot_plugin_astrbotex_interaction/README.md
+@@ -87,6 +87,14 @@ Vision channel:
+ - Vision payloads are not added by the automatic LLM request hook. JSON and
+   images become visible to the model only after it explicitly calls the vision
+   buffer tools.
++- The `set_astrbotex_vision_marks` LLM tool sends `vision.mark.set` over the
++  text channel to the EX peer that published the requested `stream_id`. First
++  read the JSON buffer for exact object IDs, then call it with
++  `{"stream_id":"...","ids":["id1","id2"],"marked":true}`. Set
++  `marked=false` to clear selected IDs. `request_id` is optional, but reuse the
++  same value when retrying an uncertain request. EX acknowledges only after
++  persisting the atomic update; other marks remain unchanged. The command
++  annotates detections and never issues motion control.
+ 
+ ## Installation
+ 
+diff --git a/astrbot_plugin_astrbotex_interaction/main.py b/astrbot_plugin_astrbotex_interaction/main.py
+index e8a731e..e3db717 100644
+--- a/astrbot_plugin_astrbotex_interaction/main.py
++++ b/astrbot_plugin_astrbotex_interaction/main.py
+@@ -34,6 +34,7 @@ from astrbot.core.astr_agent_context import AstrAgentContext
+ from astrbot.core.platform.astr_message_event import MessageSesion
+ 
+ from .output_router import PublicOutputRouter
++from .vision_marks import SetVisionMarksTool
+ from .task_coordinator import TaskCoordinator
+ from .task_models import TaskAuthority, TaskError
+ from .task_store import TaskStore
+@@ -478,6 +479,7 @@ class AstrBotEXInteractionPlugin(star.Star):
+         self._vision_json_cache: deque[dict[str, Any]] = deque(
+             maxlen=max(self.vision_cache_items, 1)
+         )
++        self._vision_mark_routes: dict[str, bytes] = {}
+         self._vision_jpeg_cache: deque[dict[str, Any]] = deque(
+             maxlen=max(self.vision_cache_items, 1)
+         )
+@@ -485,6 +487,7 @@ class AstrBotEXInteractionPlugin(star.Star):
+             SubmitAstrBotEXProposalTool(plugin=self),
+             GetVisionJsonBufferTool(plugin=self),
+             GetVisionJpegBufferTool(plugin=self),
++            SetVisionMarksTool(plugin=self),
+         )
+ 
+     async def initialize(self) -> None:
+@@ -993,10 +996,16 @@ class AstrBotEXInteractionPlugin(star.Star):
+         envelope: dict[str, Any],
+         binary: bytes | None,
+     ) -> dict[str, Any]:
+-        del peer
+         if binary is not None:
+             return {"ok": False, "error": "vision JSON channel does not accept binary frames"}
+         data = dict(envelope.get("payload", {}))
++        stream_id = str(data.get('stream_id','default'))
++        prior = self._vision_mark_routes.get(stream_id)
++        if prior is not None and prior != peer:
++            return {'ok':False,'error':'vision stream belongs to a different peer'}
++        if stream_id not in self._vision_mark_routes and len(self._vision_mark_routes)>=128:
++            return {'ok':False,'error':'vision route capacity exceeded'}
++        self._vision_mark_routes[stream_id] = peer
+         return {"ok": True, **self._append_vision_json(data)}
+ 
+     async def _handle_vision_jpeg_publish(
+diff --git a/astrbot_plugin_astrbotex_interaction/vision_marks.py b/astrbot_plugin_astrbotex_interaction/vision_marks.py
+new file mode 100644
+index 0000000..24afd25
+--- /dev/null
++++ b/astrbot_plugin_astrbotex_interaction/vision_marks.py
+@@ -0,0 +1,43 @@
++"""LLM-visible explicit object marking; routing is learned from actual vision peers."""
++from dataclasses import dataclass,field
++import json
++import uuid
++from typing import Any
++from astrbot.api import FunctionTool
++from astrbot.core.astr_agent_context import AstrAgentContext
++
++
++@dataclass
++class SetVisionMarksTool(FunctionTool[AstrAgentContext]):
++    name: str='set_astrbotex_vision_marks'
++    description: str=(
++        'Explicitly mark or unmark one or more objects read from the AstrBotEX vision JSON buffer. '
++        'Use their exact stream_id and object IDs. marked=true persists act=1 across subsequent '
++        'frames and restarts; only an explicit marked=false clears it. Other object marks stay '
++        'unchanged. This annotates objects only and does not move the robot. A missing object '
++        'retains its mark in the marks ledger. Reuse request_id when retrying an uncertain call.'
++    )
++    parameters: dict=field(default_factory=lambda:{
++        'type':'object','additionalProperties':False,
++        'properties':{'stream_id':{'type':'string'},'ids':{'type':'array','items':{'type':'string'},'minItems':1,'maxItems':100},
++                      'marked':{'type':'boolean'},'request_id':{'type':'string','description':'Optional idempotency key; reuse for retries'}},
++        'required':['stream_id','ids','marked']})
++    plugin: Any=None
++
++    async def call(self,context,**kwargs):
++        del context
++        if self.plugin is None:return json.dumps({'ok':False,'error':'vision marks not initialized'})
++        request=kwargs.get('request_id') or uuid.uuid4().hex
++        payload={'request_id':request,'stream_id':kwargs.get('stream_id'),'ids':kwargs.get('ids'),'marked':kwargs.get('marked')}
++        try:
++            if not isinstance(payload['stream_id'],str) or type(payload['marked']) is not bool:
++                raise ValueError('stream_id and boolean marked are required')
++            ids=payload['ids']
++            if not isinstance(ids,list) or not 1<=len(ids)<=100 or any(not isinstance(x,str) for x in ids):
++                raise ValueError('ids must contain 1..100 exact object IDs')
++            peer=self.plugin._vision_mark_routes.get(payload['stream_id'])
++            if peer is None:raise ValueError('No live vision route for this stream; read fresh vision JSON first')
++            reply=await self.plugin.text_channel.request('vision.mark.set',payload,peer=peer)
++            return json.dumps(reply.payload,ensure_ascii=False)
++        except Exception as exc:
++            return json.dumps({'ok':False,'request_id':request,'error':str(exc)[:300]},ensure_ascii=False)

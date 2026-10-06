@@ -1,0 +1,45 @@
+{
+  "passed": true,
+  "checks": [
+    "real_EX_loader",
+    "Core_Actor_lifecycle",
+    "native_ROS_environment",
+    "real_YOLO_inference",
+    "timestamp_first",
+    "two_ROS_outputs",
+    "SDK_VisionResult",
+    "LLM_tool_marks_multiple_objects_and_persists_across_frames",
+    "unmark_only_selected_object",
+    "retry_does_not_revert_newer_command",
+    "missing_object_mark_retained_without_fake_detection",
+    "reappearance_identity_and_mark",
+    "independent_EX_plugin_subscribes_both_Topics",
+    "real_AEB_buffer_tools_return_JSON_and_JPEG",
+    "runtime_restart_preserves_marks"
+  ],
+  "EX_commit": "1f6e4a8",
+  "AEB_commit": "2e77eba plus local mark tool",
+  "device": "0",
+  "ROS_DOMAIN_ID": "95",
+  "stream_id": "yolo-aac19dafef794365ab8fc40e4ef5b6d5",
+  "objects": 6,
+  "probe_counts": {
+    "json": 17,
+    "jpg": 17
+  },
+  "environment": {
+    "schema_version": 1,
+    "session_id": "030ded96bc454a85bf123471cf55f10e",
+    "revision": 3,
+    "desired_mode": "ros2",
+    "active_mode": "ros2",
+    "phase": "idle",
+    "health": "ok",
+    "generation": 2,
+    "operation_id": "a05d3e390495482db34120f659968b15",
+    "last_error": null,
+    "topic_bus_available": true
+  },
+  "LLM": "Real registered FunctionTool invoked deterministically; no paid model inference",
+  "input": "Official prerecorded image over native ROS, not current live camera"
+}

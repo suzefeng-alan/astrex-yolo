@@ -1,0 +1,5 @@
+FROM soulter/astrbot:v4.26.7
+RUN python -m pip install --no-cache-dir pyzmq==27.1.0
+COPY integrations/A.E.B./astrbot_plugin_astrbotex_interaction /AstrBot/data/plugins/astrbot_plugin_astrbotex_interaction
+COPY tests/yolo_native /opt/yolo-validation
+ENV AEB_CHECKOUT=/AstrBot/data/plugins
